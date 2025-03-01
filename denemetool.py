@@ -2,70 +2,58 @@ import os
 import subprocess
 import time
 
-# Wi-Fi arayüzünüzü (wlan0 veya wlp2s0 vb.) buraya yazın
-interface = "wlan0"
-ssid = "SahteAğ"  # Sahte ağ adı
-password = "12345678"  # Wi-Fi şifresi
-channel = 6  # Kanal numarası
-interface_ip = "192.168.1.1"  # Ağ IP'si
+# Kullanıcıdan giriş alalım (Wi-Fi arayüzü ve USB tethering arayüzü için)
+wifi_interface = "wlan0"  # Wi-Fi arayüzü (Wi-Fi adaptörünüzün adı)
+usb_interface = "eth0"  # USB tethering üzerinden gelen internetin arayüzü
 
-def start_hostapd():
-    """Hostapd'yi başlatır."""
-    # Hostapd yapılandırma dosyasını oluşturma
-    hostapd_conf = f"""
-interface={interface}
-driver=nl80211
-ssid={ssid}
-hw_mode=g
-channel={channel}
-wpa=2
-wpa_passphrase={password}
-"""
-    # Hostapd yapılandırmasını kaydetme
-    with open("/etc/hostapd/hostapd.conf", "w") as f:
-        f.write(hostapd_conf)
-    
-    # Hostapd'yi başlatma
-    print("Hostapd başlatılıyor...")
-    subprocess.run(["sudo", "hostapd", "/etc/hostapd/hostapd.conf"])
-
-def start_dnsmasq():
-    """Dnsmasq'ı başlatır."""
-    # Dnsmasq yapılandırma dosyasını oluşturma
-    dnsmasq_conf = f"""
-interface={interface}
-dhcp-range=192.168.1.50,192.168.1.150,12h
-"""
-    # Dnsmasq yapılandırmasını kaydetme
-    with open("/etc/dnsmasq.conf", "w") as f:
-        f.write(dnsmasq_conf)
-    
-    # Dnsmasq'ı başlatma
-    print("Dnsmasq başlatılıyor...")
-    subprocess.run(["sudo", "dnsmasq"])
-
+# Adım 1: İnternet paylaşımını sağlamak için IP yönlendirmesini etkinleştir
 def enable_ip_forwarding():
-    """IP yönlendirmeyi etkinleştirir."""
     print("IP yönlendirmesi etkinleştiriliyor...")
-    subprocess.run(["sudo", "sysctl", "net.ipv4.ip_forward=1"])
-    subprocess.run(["sudo", "iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"])
+    os.system("sudo sysctl -w net.ipv4.ip_forward=1")
 
-def setup_wifi():
-    """Wi-Fi ağını oluşturur."""
+# Adım 2: İptables kurallarını ekleyerek interneti paylaşmak
+def set_iptables():
+    print("IPTables ayarları yapılıyor...")
+    os.system(f"sudo iptables -t nat -A POSTROUTING -o {wifi_interface} -j MASQUERADE")
+    os.system(f"sudo iptables -A FORWARD -i {usb_interface} -o {wifi_interface} -m state --state RELATED,ESTABLISHED -j ACCEPT")
+    os.system(f"sudo iptables -A FORWARD -i {wifi_interface} -o {usb_interface} -j ACCEPT")
+
+# Adım 3: Dnsmasq (DHCP) servisini başlatma
+def start_dnsmasq():
+    print("dnsmasq başlatılıyor...")
+    os.system("sudo systemctl start dnsmasq")
+    os.system("sudo systemctl enable dnsmasq")
+
+# Adım 4: Hostapd (Wi-Fi AP) yapılandırmasını başlatma
+def start_hostapd():
+    print("Hostapd başlatılıyor...")
+    
+    # Hostapd yapılandırma dosyasını yazalım
+    with open("/etc/hostapd/hostapd.conf", "w") as f:
+        f.write(f"""
+interface={wifi_interface}
+driver=nl80211
+ssid=SahteAğ
+hw_mode=g
+channel=6
+wpa=2
+wpa_passphrase=12345678
+        """)
+
+    # Hostapd'yi başlatıyoruz
+    os.system(f"sudo hostapd /etc/hostapd/hostapd.conf")
+
+# Ana fonksiyon
+def main():
     print("Sahte ağ kuruluyor...")
-    
-    # Wi-Fi arayüzünü Ad-Hoc moduna al
-    subprocess.run(f"sudo iw dev {interface} set type managed", shell=True)
-    
-    # Ağ arayüzünü aç
-    subprocess.run(f"sudo ifconfig {interface} up", shell=True)
-    
-    # Sahte Wi-Fi ağı kurma
-    start_hostapd()
-    start_dnsmasq()
     enable_ip_forwarding()
+    set_iptables()
+    start_dnsmasq()
+    time.sleep(2)  # dnsmasq'ın düzgün başlatılması için kısa bir bekleme
+    start_hostapd()
 
-    print(f"Sahte ağ {ssid} başlatıldı ve şifresi: {password}")
+    print("Sahte ağ başarıyla başlatıldı ve şifresi: 12345678")
 
 if __name__ == "__main__":
-    setup_wifi()
+    main()
+    
